@@ -1,6 +1,7 @@
 import argparse
 import os
 from functools import partial
+import logging
 
 import torch
 import torch.nn as nn
@@ -12,6 +13,11 @@ from datasets import load_dataset
 from comp_utils import tokenize
 from models import Test_RottenTomatoes_Classifier
 from procedures import train, test
+
+
+logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s",
+                    datefmt="%m/%d/%Y %I:%M:%S %p",
+                    level=logging.INFO)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -102,6 +108,8 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=5e-3, weight_decay=1e-5)
     device = torch.device(args.device)
+
+    model = model.to(device)
 
     train(model,
           optimizer=optimizer,
