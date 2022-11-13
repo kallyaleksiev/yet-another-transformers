@@ -127,3 +127,13 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# VS Code
+.vscode/
+
+# MacOS
+.DS_Store
+
+# rhea-specific
+datasets/
+tokenizers/
