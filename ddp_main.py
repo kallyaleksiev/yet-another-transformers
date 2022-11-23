@@ -129,6 +129,12 @@ if __name__ == "__main__":
                         default=10000,
                         help="if training a new tokenizer, what vocabulary size to use"
                         )
+    
+    parser.add_argument("--world-size",
+                        type=int,
+                        default=4,
+                        help="how many separate processes to use for training"
+                        )
 
     parser.add_argument("--dataset",
                         type=str,
