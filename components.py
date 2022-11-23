@@ -3,6 +3,8 @@ import math
 import torch
 import torch.nn as nn
 
+from torch.nn.init import xavier_uniform_
+
 import comp_utils
 
 
@@ -59,7 +61,71 @@ class Attention(nn.Module):
         return torch.bmm(attention, values)  # b x l_x x d_out
 
 
+class MHAttention_SimulMulImpl(nn.Module):
+    r"""Multihead Attention Layer that is implemented with
+    matmul operations, so essentially computes all the attention 
+    heads at the same time and then takes care to reshape the
+    output
+    """
+
+    def __init__(self, h, d_mid, d_attn, d_out, d_x, d_z=None, o_bias=True):
+        super(MHAttention_SimulMulImpl, self).__init__()
+
+        self.num_heads = h
+        self.d_attn = d_attn
+        self.d_mid = d_mid
+        self.d_out = d_out
+        d_z = d_x if d_z is None else d_z
+
+        self.W_qs = nn.Parameter(xavier_uniform_(torch.zeros(d_x, h*d_attn)))
+        self.W_ks = nn.Parameter(xavier_uniform_(torch.zeros(d_z, h*d_attn)))
+        self.W_vs = nn.Parameter(xavier_uniform_(torch.zeros(d_z, h*d_mid)))
+        self.W_o = nn.Linear(h*d_mid, d_out, bias=o_bias)
+
+    def forward(self, primary, context, padding_mask=None, attention_mask=None):
+        b, l_x, l_z = primary.shape[0], primary.shape[1], context.shape[1]
+        h, d_attn, d_mid = self.num_heads, self.d_attn, self.d_mid
+
+        queries = torch.matmul(primary, self.W_qs)  # b x l_x x h*d_attn
+        keys = torch.matmul(context, self.W_ks)     # b x l_z x h*d_attn
+        values = torch.matmul(context, self.W_vs)   # b x l_z x h*d_mid
+
+        queries = queries.transpose(1, 2).reshape(
+            b, h, d_attn, l_x).transpose(2, 3)
+        keys = keys.transpose(1, 2).reshape(b, h, d_attn, l_z).transpose(2, 3)
+        values = values.transpose(1, 2).reshape(
+            b, h, d_mid, l_z).transpose(2, 3)
+
+        attention = torch.matmul(
+            queries, keys.transpose(2, 3))  # b x h x l_x x l_z
+
+        if padding_mask is not None:
+            mask = padding_mask.unsqueeze(dim=1)  # b x 1 x l_z
+            if attention_mask is not None:
+                mask = attention_mask.logical_and(
+                    mask).unsqueeze(dim=1)  # b x 1 x l_x x l_z
+            else:
+                mask = mask.unsqueeze(dim=1)  # b x 1 x 1 x l_z
+        elif attention_mask is not None:
+            mask = attention_mask.unsqueze(dim=1)  # b x 1 x l_x x l_z
+        else:
+            mask = torch.ones_like(attention, dtype=int)
+
+        attention = attention / math.sqrt(d_attn)
+        attention = attention.masked_fill(mask == 0, MINUS_INFINITY)
+        attention = attention.softmax(dim=-1)  # b x h x l_x x l_z
+
+        preproj = torch.matmul(attention, values)  # b x h x l_x x d_out
+        preproj = preproj.transpose(2, 3).reshape(
+            b, h*d_mid, l_x).transpose(1, 2)  # b x l_x x h*d_mid
+        return self.W_o(preproj)
+
+
 class MHAttention_ListImpl(nn.Module):
+    r"""Multihead Attention Layer that is implemented by
+    concatenating the outputs of several attention heads
+    """
+
     def __init__(self, h, d_mid, d_attn, d_out, d_x, d_z=None,
                  q_bias=True, k_bias=True, v_bias=True, o_bias=True):
         super(MHAttention_ListImpl, self).__init__()

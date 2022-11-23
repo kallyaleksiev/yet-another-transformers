@@ -5,20 +5,88 @@ import logging
 
 import torch
 import torch.nn as nn
+import torch.multiprocessing as mp
 import torch.optim as optim
+import torch.utils.data as data_utils
+
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from datasets import load_dataset
 
 from comp_utils import tokenize, train_tokenizer
+from comp_utils import tokenize
 from models import Test_RottenTomatoes_Classifier
 from procedures import train, test
+from ddp_utils import setup, cleanup
 
 
 logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s",
                     datefmt="%m/%d/%Y %I:%M:%S %p",
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def worker(rank, world_size, cli_args, partitions, val_dataloader, vocab_size):
+    r"""The computation that will be performed by a single GPU
+    """
+    setup(rank, world_size, backend="gloo")
+    model = DDP(Test_RottenTomatoes_Classifier(
+        vocab_size=vocab_size).to(rank), device_ids=[rank], find_unused_parameters=True)
+
+    train_dataloader = DataLoader(partitions[rank],
+                                  num_workers=cli_args.num_workers,
+                                  batch_size=cli_args.batch_size,
+                                  shuffle=True)
+
+    steps_per_epoch = len(train_dataloader)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(),
+                           lr=5e-3,
+                           betas=(0.9, 0.98),
+                           weight_decay=1e-5)
+    scheduler = optim.lr_scheduler.OneCycleLR(optimizer,
+                                              max_lr=0.1,
+                                              epochs=cli_args.epochs,
+                                              steps_per_epoch=steps_per_epoch,
+                                              anneal_strategy="linear",
+                                              div_factor=20)
+
+    device = torch.device(cli_args.device)
+
+    if rank == 0:
+        train(model,
+              optimizer=optimizer,
+              scheduler=scheduler,
+              criterion=criterion,
+              train_dataloader=train_dataloader,
+              val_dataloader=val_dataloader,
+              num_epochs=cli_args.epochs,
+              cuda_rank=rank)
+
+        # at the end of training, do one final test in the master process
+        test_dataset = load_dataset(path=cli_args.dataset,
+                                    cache_dir="datasets",
+                                    split="test")
+        tokenized_test = test_dataset.map(tokenization, batched=True)
+        tokenized_test.set_format(type="torch", columns=[
+            "input_ids", "attention_mask", "label"])
+        test_dataloader = DataLoader(tokenized_test,
+                                     num_workers=cli_args.num_workers,
+                                     batch_size=cli_args.batch_size,
+                                     shuffle=True)
+
+        test(model=model, test_dataloader=test_dataloader, cuda_rank=rank)
+    else:
+        train(model,
+              optimizer=optimizer,
+              scheduler=scheduler,
+              criterion=criterion,
+              train_dataloader=train_dataloader,
+              val_dataloader=None,
+              num_epochs=cli_args.epochs,
+              cuda_rank=rank)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -107,54 +175,21 @@ if __name__ == "__main__":
     tokenized_val.set_format(type="torch", columns=[
         "input_ids", "attention_mask", "label"])
 
-    train_dataloader = DataLoader(tokenized_train,
-                                  num_workers=args.num_workers,
-                                  batch_size=args.batch_size,
-                                  shuffle=True)
-
     val_dataloader = DataLoader(tokenized_val,
                                 num_workers=args.num_workers,
                                 batch_size=args.batch_size,
                                 shuffle=True)
 
-    steps_per_epoch = len(train_dataloader)
+    world_size = args.world_size
+    lengths = [len(train_dataset) // world_size for _ in range(world_size)]
+    lengths[-1] += len(train_dataset) - sum(lengths)
 
-    model = Test_RottenTomatoes_Classifier(vocab_size=VOCAB_SIZE)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(),
-                           lr=5e-3,
-                           betas=(0.9, 0.98),
-                           weight_decay=1e-5)
-    scheduler = optim.lr_scheduler.OneCycleLR(optimizer,
-                                              max_lr=0.1,
-                                              epochs=args.epochs,
-                                              steps_per_epoch=steps_per_epoch,
-                                              anneal_strategy="linear",
-                                              div_factor=20)
-    device = torch.device(args.device)
+    partitions = data_utils.random_split(tokenized_train, lengths=lengths)
 
-    model = model.to(device)
+    mp.spawn(
+        worker,
+        args=(world_size, args, partitions, val_dataloader, VOCAB_SIZE),
+        nprocs=world_size,
+    )
 
-    train(model,
-          optimizer=optimizer,
-          scheduler=scheduler,
-          criterion=criterion,
-          train_dataloader=train_dataloader,
-          val_dataloader=val_dataloader,
-          num_epochs=args.epochs,
-          device=device,)
-
-    logger.info("Finished training, running final test")
-
-    test_dataset = load_dataset(path=args.dataset,
-                                cache_dir="datasets",
-                                split="test")
-    tokenized_test = test_dataset.map(tokenization, batched=True)
-    tokenized_test.set_format(type="torch", columns=[
-                              "input_ids", "attention_mask", "label"])
-    test_dataloader = DataLoader(tokenized_test,
-                                 num_workers=args.num_workers,
-                                 batch_size=args.batch_size,
-                                 shuffle=True)
-
-    test(model=model, test_dataloader=test_dataloader, device=device)
+    cleanup()

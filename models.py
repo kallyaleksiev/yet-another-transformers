@@ -5,11 +5,12 @@ import torch.nn as nn
 from torch.nn.init import xavier_uniform_
 
 import comp_utils
-from components import MHAttention_ListImpl, LayerNorm, PWFeedForward, PositionalEncoding
+from components import MHAttention_SimulMulImpl, MHAttention_ListImpl, LayerNorm, PWFeedForward, PositionalEncoding
 
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, d_model=512, d_ff=2048, dropout=0.1, activation="ReLU"):
+    def __init__(self, vocab_size, d_model=512, d_ff=2048,
+                 dropout=0.1, activation="ReLU", mh_impl="cat"):
         super(Transformer, self).__init__()
 
         self.d_model = d_model
@@ -19,12 +20,12 @@ class Transformer(nn.Module):
 
         self.enc_dropout = nn.Dropout(p=dropout)
         encoder_layer = EncoderLayer(
-            d_model=d_model, d_ff=d_ff, dropout=dropout, activation=activation)
+            d_model=d_model, d_ff=d_ff, dropout=dropout, activation=activation, mh_impl=mh_impl)
         self.encoder_stack = comp_utils.clone(encoder_layer, times=6)
 
         self.dec_dropout = nn.Dropout(p=dropout)
         decoder_layer = DecoderLayer(
-            d_model=d_model, d_ff=d_ff, dropout=dropout, activation=activation)
+            d_model=d_model, d_ff=d_ff, dropout=dropout, activation=activation, mh_impl=mh_impl)
         self.decoder_stack = comp_utils.clone(decoder_layer, times=6)
 
         self.linear = nn.Linear(d_model, d_model)
@@ -62,16 +63,20 @@ class Transformer(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model=512, d_ff=2048, dropout=0.1, activation="ReLU"):
+    def __init__(self, d_model=512, d_ff=2048, dropout=0.1, activation="ReLU", mh_impl="cat"):
         super(EncoderLayer, self).__init__()
+
+        if mh_impl == "cat":
+            multihead_type = MHAttention_ListImpl
+        else:  # mh_impl == "matmul"
+            multihead_type = MHAttention_SimulMulImpl
 
         assert d_model % 8 == 0, "Dimension of the model must be divisible by 8 (the default number of heads)"
         d_mid = d_model // 8
 
-        self.mha = MHAttention_ListImpl(h=8, d_mid=d_mid, d_attn=d_mid,
-                                        d_out=d_model, d_x=d_model, d_z=d_model,
-                                        q_bias=False, k_bias=False, v_bias=False,
-                                        o_bias=True)
+        self.mha = multihead_type(h=8, d_mid=d_mid, d_attn=d_mid,
+                                  d_out=d_model, d_x=d_model, d_z=d_model,
+                                  o_bias=True)
         self.dropout1 = nn.Dropout(p=dropout)
         self.layernorm1 = LayerNorm(d_input=d_model)
 
@@ -97,23 +102,26 @@ class EncoderLayer(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model=512, d_ff=512, dropout=0.1, activation="ReLU"):
+    def __init__(self, d_model=512, d_ff=512, dropout=0.1, activation="ReLU", mh_impl="cat"):
         super(DecoderLayer, self).__init__()
+
+        if mh_impl == "cat":
+            multihead_type = MHAttention_ListImpl
+        else:  # mh_impl == "matmul"
+            multihead_type = MHAttention_SimulMulImpl
 
         assert d_model % 8 == 0, "Dimension of the model must be divisible by 8 (the default number of heads)"
         d_mid = d_model // 8
 
-        self.mha1 = MHAttention_ListImpl(h=8, d_mid=d_mid, d_attn=d_mid,
-                                         d_out=d_model, d_x=d_model, d_z=d_model,
-                                         q_bias=False, k_bias=False, v_bias=False,
-                                         o_bias=True)
+        self.mha1 = multihead_type(h=8, d_mid=d_mid, d_attn=d_mid,
+                                   d_out=d_model, d_x=d_model, d_z=d_model,
+                                   o_bias=True)
         self.dropout1 = nn.Dropout(p=dropout)
         self.layernorm1 = LayerNorm(d_input=d_model)
 
-        self.mha2 = MHAttention_ListImpl(h=8, d_mid=d_mid, d_attn=d_mid,
-                                         d_out=d_model, d_x=d_model, d_z=d_model,
-                                         q_bias=False, k_bias=False, v_bias=False,
-                                         o_bias=True)
+        self.mha2 = multihead_type(h=8, d_mid=d_mid, d_attn=d_mid,
+                                   d_out=d_model, d_x=d_model, d_z=d_model,
+                                   o_bias=True)
         self.dropout2 = nn.Dropout(p=dropout)
         self.layernorm2 = LayerNorm(d_input=d_model)
 
@@ -154,7 +162,8 @@ class Test_RottenTomatoes_Classifier(nn.Module):
         self.small_transformer = Transformer(vocab_size=vocab_size,
                                              d_model=16,
                                              d_ff=64,
-                                             dropout=0.1,)
+                                             dropout=0.1,
+                                             mh_impl="matmul")
         self.classifier = nn.Linear(16, 2)
 
     def forward(self, input_ids, padding_mask):

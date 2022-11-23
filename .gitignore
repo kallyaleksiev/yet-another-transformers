@@ -137,3 +137,5 @@ dmypy.json
 # rhea-specific
 datasets/
 tokenizers/
+driver.ipynb
+attention\ test.ipynb
