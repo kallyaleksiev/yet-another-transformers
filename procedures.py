@@ -46,7 +46,7 @@ def train(model,
 
         end_epoch = time.time()
         total_seconds = end_epoch - start_epoch
-        log_message = f"Epoch {epoch+1}, Total Time: {total_seconds:.2f} seconds, Total Loss: {total_loss}"
+        log_message = f"Epoch {epoch+1}, Total Time: {total_seconds:.2f} seconds, Total Loss: {total_loss:.2f}"
         logger.info(log_message)
 
         torch.cuda.empty_cache()
