@@ -22,7 +22,7 @@ def train(model,
     # in a distributed scenario use the index of
     # the relevant gpu for .to(...) calls rather
     # than the torch device
-    device = cuda_rank or device
+    device = cuda_rank if cuda_rank is not None else device
     for epoch in range(num_epochs):
         start_epoch = time.time()
         total_loss = 0.0
@@ -70,7 +70,7 @@ def test(model,
     # in a distributed scenario use the index of
     # the relevant gpu for .to(...) calls rather
     # than the torch device
-    device = cuda_rank or device
+    device = cuda_rank if cuda_rank is not None else device
     model.eval()
     correct = 0
     start_test = time.time()
