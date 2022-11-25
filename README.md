@@ -11,13 +11,16 @@ There is also a distributed (data parallel) implementation, which significantly 
 
 The CLI gives several options, including the possibility of training your own (huggingface) tokenizer from scratch on the dataset, how many processes to spawn for parallel training, etc.
 
-The figure below shows the training time on selected hardware and with different parallelism configurations.
+The figure below shows the training time in seconds for 1 epoch on the training set on selected hardware and with different parallelism configurations:
+
+<img src="assets/gpu_mps_results.png" alt="drawing" width="400" height="400"/>
 
 
 ## Contents
 
 |     FILE/FOLDER       |   DESCRIPTION                                            |
 |-----------------------|----------------------------------------------------------|
+|   `assets`            |  Graph of training times for different types of hardware |
 |   `requirements.txt`  |  List of python requirements                             |
 |   `comp_utils.py`     |  Function to aid general computation, e.g. tokenizing    |
 |   `ddp_utils.py`      |  Function to aid distributed computation                 |
