@@ -1,4 +1,4 @@
-# rhea
+# yet-another-transformers
 
 This is yet another implementation of the Transformers from scratch. 
 
