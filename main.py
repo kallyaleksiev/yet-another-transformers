@@ -157,6 +157,7 @@ if __name__ == "__main__":
                                  batch_size=args.batch_size,
                                  shuffle=True)
 
-    accuracy, test_total_seconds = test(model=model, test_dataloader=test_dataloader, device=device)
+    accuracy, test_total_seconds = test(
+        model=model, test_dataloader=test_dataloader, device=device)
     log_message = f"Test completed, Accuracy: {accuracy}, Total Time: {test_total_seconds:.2f}"
     logger.info(log_message)

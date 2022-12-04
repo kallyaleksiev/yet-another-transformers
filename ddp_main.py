@@ -76,7 +76,10 @@ def worker(rank, world_size, cli_args, partitions, val_dataloader, vocab_size):
                                      batch_size=cli_args.batch_size,
                                      shuffle=True)
 
-        test(model=model, test_dataloader=test_dataloader, cuda_rank=rank)
+        accuracy, test_total_seconds = test(
+            model=model, test_dataloader=test_dataloader, cuda_rank=rank)
+        log_message = f"Test completed, Accuracy: {accuracy}, Total Time: {test_total_seconds:.2f}"
+        logger.info(log_message)
     else:
         train(model,
               optimizer=optimizer,
@@ -129,7 +132,7 @@ if __name__ == "__main__":
                         default=10000,
                         help="if training a new tokenizer, what vocabulary size to use"
                         )
-    
+
     parser.add_argument("--world-size",
                         type=int,
                         default=4,
@@ -197,5 +200,3 @@ if __name__ == "__main__":
         args=(world_size, args, partitions, val_dataloader, VOCAB_SIZE),
         nprocs=world_size,
     )
-
-    cleanup()
